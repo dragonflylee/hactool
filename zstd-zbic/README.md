@@ -1,0 +1,1 @@
+Amalgamated from https://github.com/hexkyz/zstd/tree/02a8f10c6f4acfcfba2e31e034fbae9f07938f96

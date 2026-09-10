@@ -2,9 +2,9 @@ include config.mk
 
 .PHONY: clean
 
-INCLUDE = -I ./mbedtls/include
+INCLUDE = -I ./mbedtls/include -I ./zstd-zbic
 LIBDIR = ./mbedtls/library
-CFLAGS += -D_BSD_SOURCE -D_POSIX_SOURCE -D_POSIX_C_SOURCE=200112L -D_DEFAULT_SOURCE -D__USE_MINGW_ANSI_STDIO=1 -D_FILE_OFFSET_BITS=64
+CFLAGS += -D_BSD_SOURCE -D_POSIX_SOURCE -D_POSIX_C_SOURCE=200112L -D_DEFAULT_SOURCE -D__USE_MINGW_ANSI_STDIO=1 -D_FILE_OFFSET_BITS=64 -DZSTD_ZBIC_SUPPORT=1
 
 all:
 	$(MAKE) -C mbedtls lib
@@ -13,7 +13,7 @@ all:
 .c.o:
 	$(CC) $(INCLUDE) -c $(CFLAGS) -o $@ $<
 
-hactool$(EXEEXT): save.o sha.o aes.o extkeys.o rsa.o npdm.o bktr.o kip.o packages.o pki.o pfs0.o hfs0.o nca0_romfs.o romfs.o utils.o nax0.o nso.o lz4.o nca.o xci.o main.o filepath.o ConvertUTF.o cJSON.o
+hactool$(EXEEXT): save.o sha.o aes.o extkeys.o rsa.o npdm.o bktr.o kip.o packages.o pki.o pfs0.o hfs0.o nca0_romfs.o romfs.o utils.o nax0.o nso.o lz4.o nca.o xci.o main.o filepath.o ConvertUTF.o cJSON.o zstd-zbic/zstd.o
 	$(CC) -o $@ $^ -L $(LIBDIR) $(LDFLAGS)
 
 aes.o: aes.h types.h
@@ -64,11 +64,13 @@ ConvertUTF.o: ConvertUTF.h
 
 cJSON.o: cJSON.h
 
+zstd-zbic/zstd.o: zstd-zbic/zstd.h zstd-zbic/zstd_errors.h
+
 clean:
-	rm -f *.o hactool hactool.exe
+	rm -f *.o zstd-zbic/*.o hactool hactool.exe
 
 clean_full:
-	rm -f *.o hactool hactool.exe
+	rm -f *.o zstd-zbic/*.o hactool hactool.exe
 	$(MAKE) -C mbedtls clean
 
 dist: clean_full

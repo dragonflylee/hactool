@@ -2,6 +2,18 @@
 #include "nso.h"
 #include "lz4.h"
 #include "sha.h"
+#include "zstd.h"
+
+typedef int (*decompressor_func_t)(const char *src, char *dst, int compressed_size, int dst_capacity);
+
+static int ZBIC_decompress(const char *src, char *dst, int compressed_size, int dst_capacity) {
+    size_t decomp_size = ZSTD_decompress(dst, dst_capacity, src, compressed_size);
+    if (ZSTD_isError(decomp_size)) {
+        return -1;
+    }
+
+    return (int)decomp_size;
+}
 
 static void *nso_uncompress(nso0_ctx_t *ctx) {
     /* Make new header with correct sizes, fixed flags. */
@@ -10,11 +22,18 @@ static void *nso_uncompress(nso0_ctx_t *ctx) {
         new_header.segments[i].file_off = new_header.segments[i].dst_off + sizeof(nso0_header_t);
         new_header.compressed_sizes[i] = new_header.segments[i].decomp_size;
     }
+
+    decompressor_func_t decompress = LZ4_decompress_safe;
+
+    if (ctx->header->flags & 0x80) {
+        decompress = ZBIC_decompress;
+    }
+
     /* Clear module offset/size. */
     new_header.segments[0].align_or_total_size = 0x100;
     new_header.segments[1].align_or_total_size = 0;
     /* Clear compression flags. */
-    new_header.flags &= 0xF8;
+    new_header.flags &= 0x78;
 
     uint64_t size = nso_get_size(&new_header);
     nso0_header_t *new_nso = calloc(1, size);
@@ -28,7 +47,7 @@ static void *nso_uncompress(nso0_ctx_t *ctx) {
         char *src = (char *)ctx->header + ctx->header->segments[segment].file_off;
         char *dst = (char *)new_nso + new_header.segments[segment].file_off;
         if ((ctx->header->flags >> segment) & 1) {
-            if (LZ4_decompress_safe(src, dst, ctx->header->compressed_sizes[segment], new_header.segments[segment].decomp_size) != (int)new_header.segments[segment].decomp_size) {
+            if (decompress(src, dst, ctx->header->compressed_sizes[segment], new_header.segments[segment].decomp_size) != (int)new_header.segments[segment].decomp_size) {
                 fprintf(stderr, "Error: Failed to decompress NSO0 segment %u!\n", segment);
                 exit(EXIT_FAILURE);
             }

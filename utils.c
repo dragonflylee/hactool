@@ -253,7 +253,31 @@ const char *get_key_revision_summary(uint8_t key_rev) {
         case 9:
             return "9.0.0-9.0.1";
         case 0xA:
-            return "9.1.0-";
+            return "9.1.0-12.0.3";
+        case 0xB:
+            return "12.1.0";
+        case 0xC:
+            return "13.0.0-13.2.1";
+        case 0xD:
+            return "14.0.0-14.1.2";
+        case 0xE:
+            return "15.0.0";
+        case 0xF:
+            return "16.0.0-16.1.0";
+        case 0x10:
+            return "17.0.0-17.0.1";
+        case 0x11:
+            return "18.0.0-18.1.0";
+        case 0x12:
+            return "19.0.0-19.0.2";
+        case 0x13:
+            return "20.0.0-20.5.0";
+        case 0x14:
+            return "21.0.0-21.2.0";
+        case 0x15:
+            return "22.0.0-22.5.0";
+        case 0x16:
+            return "23.0.0-";
         default:
             return "Unknown";
     }

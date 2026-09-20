@@ -36,7 +36,7 @@ static void nca_update_bktr_ctr(unsigned char *ctr, uint32_t ctr_val, uint64_t o
 }
 
 /* Seek to an offset within a section. */
-void nca_section_fseek(nca_section_ctx_t *ctx, uint64_t offset) {
+void nca_section_fseek_raw(nca_section_ctx_t *ctx, uint64_t offset) {
     if (ctx->is_decrypted) {
         fseeko64(ctx->file, (ctx->offset + offset), SEEK_SET);
         ctx->cur_seek = (ctx->offset + offset);
@@ -130,7 +130,7 @@ static size_t nca_bktr_section_physical_fread(nca_section_ctx_t *ctx, void *buff
     return read;
 }
 
-size_t nca_section_fread(nca_section_ctx_t *ctx, void *buffer, size_t count) {
+size_t nca_section_fread_raw(nca_section_ctx_t *ctx, void *buffer, size_t count) {
     size_t read = 0; /* XXX */
     size_t size = 1;
     char block_buf[0x10];
@@ -271,12 +271,44 @@ size_t nca_section_fread(nca_section_ctx_t *ctx, void *buffer, size_t count) {
     return read;
 }
 
+/* Raw storage accessor used by the compression layer. `offset` is relative to
+ * the start of the IVFC data layer. */
+static size_t nca_section_compress_base_read(void *raw_ctx, uint64_t offset, void *buffer, size_t count) {
+    nca_section_ctx_t *ctx = raw_ctx;
+    nca_section_fseek_raw(ctx, ctx->compress_ctx.data_offset + offset);
+    return nca_section_fread_raw(ctx, buffer, count);
+}
+
+/* Seek within a section, taking the NCA compression layer into account. */
+void nca_section_fseek(nca_section_ctx_t *ctx, uint64_t offset) {
+    if (ctx->compress_ctx.is_present && offset >= ctx->compress_ctx.data_offset) {
+        ctx->compress_seek_active = 1;
+        ctx->compress_seek_ofs = offset - ctx->compress_ctx.data_offset;
+        ctx->cur_seek = ctx->offset + offset;
+        return;
+    }
+    ctx->compress_seek_active = 0;
+    nca_section_fseek_raw(ctx, offset);
+}
+
+/* Read from a section, transparently decompressing if needed. */
+size_t nca_section_fread(nca_section_ctx_t *ctx, void *buffer, size_t count) {
+    if (ctx->compress_seek_active) {
+        size_t read = nca_compress_read(&ctx->compress_ctx, ctx->compress_seek_ofs, buffer, count);
+        ctx->compress_seek_ofs += read;
+        ctx->cur_seek += read;
+        return read;
+    }
+    return nca_section_fread_raw(ctx, buffer, count);
+}
+
 void nca_free_section_contexts(nca_ctx_t *ctx) {
     for (unsigned int i = 0; i < 4; i++) {
         if (ctx->section_contexts[i].is_present) {
             if (ctx->section_contexts[i].aes) {
                 free_aes_ctx(ctx->section_contexts[i].aes);
             }
+            nca_compress_free(&ctx->section_contexts[i].compress_ctx);
             if (ctx->section_contexts[i].type == PFS0 && ctx->section_contexts[i].pfs0_ctx.is_exefs) {
                 free(ctx->section_contexts[i].pfs0_ctx.npdm);
             } else if (ctx->section_contexts[i].type == ROMFS) {
@@ -1068,6 +1100,30 @@ void nca_process_ivfc_section(nca_section_ctx_t *ctx) {
     }
 
     ctx->romfs_ctx.romfs_offset = ctx->romfs_ctx.ivfc_levels[IVFC_MAX_LEVEL - 1].data_offset;
+
+    /* Check for an NCA compression layer. */
+    {
+        nca_compression_info_t comp;
+        unsigned char *fsh = (unsigned char *)ctx->header;
+        memcpy(&comp.table_offset, fsh + 0x178, 8);
+        memcpy(&comp.table_size, fsh + 0x180, 8);
+        memcpy(comp.table_header, fsh + 0x188, 0x10);
+        memcpy(&comp.reserved, fsh + 0x198, 8);
+
+        if (comp.table_offset != 0 && comp.table_size != 0) {
+            ctx->compress_ctx.is_present = 1;
+            ctx->compress_ctx.data_offset = ctx->romfs_ctx.romfs_offset;
+            ctx->compress_ctx.base_ctx = ctx;
+            ctx->compress_ctx.base_read = nca_section_compress_base_read;
+            ctx->compress_ctx.tree.storage_ctx = ctx;
+            ctx->compress_ctx.tree.storage_read = nca_section_compress_base_read;
+            if (nca_compress_setup(&ctx->compress_ctx, &comp) != 0) {
+                fprintf(stderr, "Failed to initialize NCA compression layer!\n");
+                ctx->compress_ctx.is_present = 0;
+            }
+        }
+    }
+
     nca_section_fseek(ctx, ctx->romfs_ctx.romfs_offset);
     if (nca_section_fread(ctx, &ctx->romfs_ctx.header, sizeof(romfs_hdr_t)) != sizeof(romfs_hdr_t)) {
         fprintf(stderr, "Failed to read RomFS header!\n");

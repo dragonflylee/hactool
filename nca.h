@@ -11,6 +11,7 @@
 #include "ivfc.h"
 #include "nca0_romfs.h"
 #include "bktr.h"
+#include "nca_compress.h"
 
 #define MAGIC_NCA3 0x3341434E /* "NCA3" */
 #define MAGIC_NCA2 0x3241434E /* "NCA2" */
@@ -171,6 +172,10 @@ typedef struct {
     uint32_t sector_ofs;
     int physical_reads; /* Should reads be forced physical? */
     section_crypt_type_t crypt_type;
+    /* NCA compression layer (bucket tree + LZ4/zstd). */
+    nca_compress_ctx_t compress_ctx;
+    int compress_seek_active;   /* Is the "current seek" a compressed read? */
+    uint64_t compress_seek_ofs; /* Offset within the decompressed data layer. */
 } nca_section_ctx_t;
 
 typedef struct nca_ctx {
@@ -201,6 +206,10 @@ void nca_free_section_contexts(nca_ctx_t *ctx);
 
 void nca_section_fseek(nca_section_ctx_t *ctx, uint64_t offset);
 size_t nca_section_fread(nca_section_ctx_t *ctx, void *buffer, size_t count);
+
+/* Raw (no compression) section access. */
+void nca_section_fseek_raw(nca_section_ctx_t *ctx, uint64_t offset);
+size_t nca_section_fread_raw(nca_section_ctx_t *ctx, void *buffer, size_t count);
 
 void nca_save_section_file(nca_section_ctx_t *ctx, uint64_t ofs, uint64_t total_size, filepath_t *filepath);
 
